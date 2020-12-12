@@ -77,6 +77,7 @@ HOST_CONFIG_KEYS = [
     'cpuset',
     'device_cgroup_rules',
     'devices',
+    'device_requests',
     'dns',
     'dns_search',
     'dns_opt',
@@ -411,7 +412,7 @@ class Service:
         stopped = [c for c in containers if not c.is_running]
 
         if stopped:
-            return ConvergencePlan('start', stopped)
+            return ConvergencePlan('start', containers)
 
         return ConvergencePlan('noop', containers)
 
@@ -514,8 +515,9 @@ class Service:
             self._downscale(containers[scale:], timeout)
             containers = containers[:scale]
         if start:
+            stopped = [c for c in containers if not c.is_running]
             _, errors = parallel_execute(
-                containers,
+                stopped,
                 lambda c: self.start_container_if_stopped(c, attach_logs=not detached, quiet=True),
                 lambda c: c.name,
                 "Starting",
@@ -715,7 +717,7 @@ class Service:
             'volumes_from': [
                 (v.source.name, v.mode)
                 for v in self.volumes_from if isinstance(v.source, Service)
-            ],
+            ]
         }
 
     def get_dependency_names(self):
@@ -1015,6 +1017,7 @@ class Service:
             privileged=options.get('privileged', False),
             network_mode=self.network_mode.mode,
             devices=options.get('devices'),
+            device_requests=options.get('device_requests'),
             dns=options.get('dns'),
             dns_opt=options.get('dns_opt'),
             dns_search=options.get('dns_search'),
@@ -1325,6 +1328,24 @@ class Service:
             result[permitted[k]] = result[permitted[k].lower()] = v
 
         return result
+
+    def get_profiles(self):
+        if 'profiles' not in self.options:
+            return []
+
+        return self.options.get('profiles')
+
+    def enabled_for_profiles(self, enabled_profiles):
+        # if service has no profiles specified it is always enabled
+        if 'profiles' not in self.options:
+            return True
+
+        service_profiles = self.options.get('profiles')
+        for profile in enabled_profiles:
+            if profile in service_profiles:
+                return True
+
+        return False
 
 
 def short_id_alias_exists(container, network):
