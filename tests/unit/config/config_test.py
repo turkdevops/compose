@@ -2397,7 +2397,8 @@ web:
             'image': 'busybox',
             'depends_on': {
                 'app1': {'condition': 'service_started'},
-                'app2': {'condition': 'service_healthy'}
+                'app2': {'condition': 'service_healthy'},
+                'app3': {'condition': 'service_completed_successfully'}
             }
         }
         override = {}
@@ -2409,11 +2410,12 @@ web:
             'image': 'busybox',
             'depends_on': {
                 'app1': {'condition': 'service_started'},
-                'app2': {'condition': 'service_healthy'}
+                'app2': {'condition': 'service_healthy'},
+                'app3': {'condition': 'service_completed_successfully'}
             }
         }
         override = {
-            'depends_on': ['app3']
+            'depends_on': ['app4']
         }
 
         actual = config.merge_service_dicts(base, override, VERSION)
@@ -2422,7 +2424,8 @@ web:
             'depends_on': {
                 'app1': {'condition': 'service_started'},
                 'app2': {'condition': 'service_healthy'},
-                'app3': {'condition': 'service_started'}
+                'app3': {'condition': 'service_completed_successfully'},
+                'app4': {'condition': 'service_started'},
             }
         }
 
@@ -3567,9 +3570,11 @@ class InterpolationTest(unittest.TestCase):
     @mock.patch.dict(os.environ)
     def test_config_file_with_options_environment_file(self):
         project_dir = 'tests/fixtures/default-env-file'
+        # env-file is relative to current working dir
+        env = Environment.from_env_file(project_dir, project_dir + '/.env2')
         service_dicts = config.load(
             config.find(
-                project_dir, None, Environment.from_env_file(project_dir, '.env2')
+                project_dir, None, env
             )
         ).services
 
@@ -5233,6 +5238,8 @@ class GetDefaultConfigFilesTestCase(unittest.TestCase):
     files = [
         'docker-compose.yml',
         'docker-compose.yaml',
+        'compose.yml',
+        'compose.yaml',
     ]
 
     def test_get_config_path_default_file_in_basedir(self):
@@ -5266,8 +5273,10 @@ def get_config_filename_for_files(filenames, subdir=None):
             base_dir = tempfile.mkdtemp(dir=project_dir)
         else:
             base_dir = project_dir
-        filename, = config.get_default_config_files(base_dir)
-        return os.path.basename(filename)
+        filenames = config.get_default_config_files(base_dir)
+        if not filenames:
+            raise config.ComposeFileNotFound(config.SUPPORTED_FILENAMES)
+        return os.path.basename(filenames[0])
     finally:
         shutil.rmtree(project_dir)
 

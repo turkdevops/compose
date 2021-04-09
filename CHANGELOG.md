@@ -1,6 +1,177 @@
 Change log
 ==========
 
+1.29.0 (2021-04-06)
+-------------------
+
+[List of PRs / issues for this release](https://github.com/docker/compose/milestone/56?closed=1)
+
+### Features
+
+- Add profile filter to `docker-compose config`
+
+- Add a `depends_on` condition to wait for successful service completion
+
+### Miscellaneous
+
+- Add image scan message on build
+
+- Update warning message for `--no-ansi` to mention `--ansi never` as alternative
+
+- Bump docker-py to 5.0.0
+
+- Bump PyYAML to 5.4.1
+
+- Bump python-dotenv to 0.17.0
+
+1.28.6 (2021-03-23)
+-------------------
+
+[List of PRs / issues for this release](https://github.com/docker/compose/milestone/57?closed=1)
+
+### Bugs
+
+- Make `--env-file` relative to the current working directory and error out for invalid paths. Environment file paths set with `--env-file` are relative to the current working directory while the default `.env` file is located in the project directory which by default is the base directory of the Compose file.
+
+- Fix missing service property `storage_opt` by updating the compose schema
+
+- Fix build `extra_hosts` list format
+
+- Remove extra error message on `exec`
+
+### Miscellaneous
+
+- Add `compose.yml` and `compose.yaml` to default filename list
+
+1.28.5 (2021-02-25)
+-------------------
+
+[List of PRs / issues for this release](https://github.com/docker/compose/milestone/55?closed=1)
+
+### Bugs
+
+- Fix OpenSSL version mismatch error when shelling out to the ssh client (via bump to docker-py 4.4.4 which contains the fix)
+
+- Add missing build flags to the native builder: `platform`, `isolation` and `extra_hosts`
+
+- Remove info message on native build
+
+- Avoid fetching logs when service logging driver is set to 'none'
+
+1.28.4 (2021-02-18)
+-------------------
+
+[List of PRs / issues for this release](https://github.com/docker/compose/milestone/54?closed=1)
+
+### Bugs
+
+- Fix SSH port parsing by bumping docker-py to 4.4.3
+
+### Miscellaneous
+
+- Bump Python to 3.7.10
+
+1.28.3 (2021-02-17)
+-------------------
+
+[List of PRs / issues for this release](https://github.com/docker/compose/milestone/53?closed=1)
+
+### Bugs
+
+- Fix SSH hostname parsing when it contains leading s/h, and remove the quiet option that was hiding the error (via docker-py bump to 4.4.2)
+
+- Fix key error for '--no-log-prefix' option
+
+- Fix incorrect CLI environment variable name for service profiles: `COMPOSE_PROFILES` instead of `COMPOSE_PROFILE`
+
+- Fix fish completion
+
+### Miscellaneous
+
+- Bump cryptography to 3.3.2
+
+- Remove log driver filter
+
+1.28.2 (2021-01-26)
+-------------------
+
+### Miscellaneous
+
+- CI setup update
+
+1.28.1 (2021-01-25)
+-------------------
+
+### Bugs
+
+- Revert to Python 3.7 bump for Linux static builds
+
+- Add bash completion for `docker-compose logs|up --no-log-prefix`
+
+1.28.0 (2021-01-20)
+-------------------
+
+### Features
+
+- Support for Nvidia GPUs via device requests
+
+- Support for service profiles
+
+- Change the SSH connection approach to the Docker CLI's via shellout to the local SSH client (old behaviour enabled by setting `COMPOSE_PARAMIKO_SSH` environment variable)
+
+- Add flag to disable log prefix
+
+- Add flag for ansi output control
+
+### Bugs
+
+- Make `parallel_pull=True` by default
+
+- Bring back warning for configs in non-swarm mode
+
+- Take `--file` in account when defining `project_dir`
+
+- On `compose up`, attach only to services we read logs from
+
+### Miscellaneous
+
+- Make COMPOSE_DOCKER_CLI_BUILD=1 the default
+
+- Add usage metrics
+
+- Sync schema with COMPOSE specification
+
+- Improve failure report for missing mandatory environment variables
+
+- Bump attrs to 20.3.0
+
+- Bump more_itertools to 8.6.0
+
+- Bump cryptograhy to 3.2.1
+
+- Bump cffi to 1.14.4
+
+- Bump virtualenv to 20.2.2
+
+- Bump bcrypt to 3.2.0
+
+- Bump gitpython to 3.1.11
+
+- Bump docker-py to 4.4.1
+
+- Bump Python to 3.9
+
+- Linux: bump Debian base image from stretch to buster (required for Python 3.9)
+
+- macOS: OpenSSL 1.1.1g to 1.1.1h, Python 3.7.7 to 3.9.0
+
+- Bump pyinstaller 4.1
+
+- Loosen restriction on base images to latest minor
+
+- Updates of READMEs
+
+
 1.27.4 (2020-09-24)
 -------------------
 

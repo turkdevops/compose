@@ -11,7 +11,7 @@ docker run --rm \
   "$TAG" tox -e pre-commit
 
 get_versions="docker run --rm
-    --entrypoint=/code/.tox/py39/bin/python
+    --entrypoint=/code/.tox/py37/bin/python
     $TAG
     /code/script/test/versions.py docker/docker-ce,moby/moby"
 
@@ -21,10 +21,8 @@ elif [ "$DOCKER_VERSIONS" == "all" ]; then
   DOCKER_VERSIONS=$($get_versions -n 2 recent)
 fi
 
-DOCKER_VERSIONS=19.03.14
-
 BUILD_NUMBER=${BUILD_NUMBER-$USER}
-PY_TEST_VERSIONS=${PY_TEST_VERSIONS:-py39}
+PY_TEST_VERSIONS=${PY_TEST_VERSIONS:-py37}
 
 for version in $DOCKER_VERSIONS; do
   >&2 echo "Running tests against Docker $version"
@@ -40,16 +38,18 @@ for version in $DOCKER_VERSIONS; do
 
   trap "on_exit" EXIT
 
-  repo="dockerswarm/dind"
-
   docker run \
     -d \
     --name "$daemon_container" \
     --privileged \
     --volume="/var/lib/docker" \
-    "$repo:$version" \
+    -v $DOCKER_CONFIG/config.json:/root/.docker/config.json \
+    -e "DOCKER_TLS_CERTDIR=" \
+    "docker:$version-dind" \
     dockerd -H tcp://0.0.0.0:2375 $DOCKER_DAEMON_ARGS \
     2>&1 | tail -n 10
+
+  docker exec "$daemon_container" sh -c "apk add --no-cache git"
 
   docker run \
     --rm \

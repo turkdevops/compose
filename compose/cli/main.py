@@ -2,7 +2,6 @@ import contextlib
 import functools
 import json
 import logging
-import os
 import pipes
 import re
 import subprocess
@@ -24,9 +23,11 @@ from ..config import resolve_build_args
 from ..config.environment import Environment
 from ..config.serialize import serialize_config
 from ..config.types import VolumeSpec
+from ..const import IS_LINUX_PLATFORM
 from ..const import IS_WINDOWS_PLATFORM
 from ..errors import StreamParseError
 from ..metrics.decorator import metrics
+from ..parallel import ParallelStreamWriter
 from ..progress_stream import StreamOutputError
 from ..project import get_image_digests
 from ..project import MissingDigests
@@ -40,6 +41,7 @@ from ..service import ImageType
 from ..service import NeedsBuildError
 from ..service import OperationFailedError
 from ..utils import filter_attached_for_up
+from .colors import AnsiMode
 from .command import get_config_from_options
 from .command import get_project_dir
 from .command import project_from_options
@@ -62,7 +64,6 @@ if not IS_WINDOWS_PLATFORM:
     from dockerpty.pty import PseudoTerminal, RunOperation, ExecOperation
 
 log = logging.getLogger(__name__)
-console_handler = logging.StreamHandler(sys.stderr)
 
 
 def main():  # noqa: C901
@@ -78,6 +79,8 @@ def main():  # noqa: C901
     try:
         command_func = dispatch()
         command_func()
+        if not IS_LINUX_PLATFORM and command == 'help':
+            print("\nDocker Compose is now in the Docker CLI, try `docker compose` help")
     except (KeyboardInterrupt, signals.ShutdownException):
         exit_with_metrics(command, "Aborting.", status=Status.FAILURE)
     except (UserError, NoSuchService, ConfigurationError,
@@ -98,6 +101,8 @@ def main():  # noqa: C901
                               e.service.name), status=Status.FAILURE)
     except NoSuchCommand as e:
         commands = "\n".join(parse_doc_section("commands:", getdoc(e.supercommand)))
+        if not IS_LINUX_PLATFORM:
+            commands += "\n\nDocker Compose is now in the Docker CLI, try `docker compose`"
         exit_with_metrics(e.command, "No such command: {}\n\n{}".format(e.command, commands))
     except (errors.ConnectionError, StreamParseError):
         exit_with_metrics(command, status=Status.FAILURE)
@@ -116,6 +121,10 @@ def main():  # noqa: C901
         code = 0
         if isinstance(e.code, int):
             code = e.code
+
+        if not IS_LINUX_PLATFORM and not command:
+            msg += "\n\nDocker Compose is now in the Docker CLI, try `docker compose`"
+
         exit_with_metrics(command, log_msg=msg, status=status,
                           exit_code=code)
 
@@ -128,7 +137,7 @@ def get_filtered_args(args):
 
 
 def exit_with_metrics(command, log_msg=None, status=Status.SUCCESS, exit_code=1):
-    if log_msg:
+    if log_msg and command != 'exec':
         if not exit_code:
             log.info(log_msg)
         else:
@@ -139,18 +148,39 @@ def exit_with_metrics(command, log_msg=None, status=Status.SUCCESS, exit_code=1)
 
 
 def dispatch():
-    setup_logging()
+    console_stream = sys.stderr
+    console_handler = logging.StreamHandler(console_stream)
+    setup_logging(console_handler)
     dispatcher = DocoptDispatcher(
         TopLevelCommand,
         {'options_first': True, 'version': get_version_info('compose')})
 
     options, handler, command_options = dispatcher.parse(sys.argv[1:])
+
+    ansi_mode = AnsiMode.AUTO
+    try:
+        if options.get("--ansi"):
+            ansi_mode = AnsiMode(options.get("--ansi"))
+    except ValueError:
+        raise UserError(
+            'Invalid value for --ansi: {}. Expected one of {}.'.format(
+                options.get("--ansi"),
+                ', '.join(m.value for m in AnsiMode)
+            )
+        )
+    if options.get("--no-ansi"):
+        if options.get("--ansi"):
+            raise UserError("--no-ansi and --ansi cannot be combined.")
+        log.warning('--no-ansi option is deprecated and will be removed in future versions. '
+                    'Use `--ansi never` instead.')
+        ansi_mode = AnsiMode.NEVER
+
     setup_console_handler(console_handler,
                           options.get('--verbose'),
-                          set_no_color_if_clicolor(options.get('--no-ansi')),
+                          ansi_mode.use_ansi_codes(console_handler.stream),
                           options.get("--log-level"))
-    setup_parallel_logger(set_no_color_if_clicolor(options.get('--no-ansi')))
-    if options.get('--no-ansi'):
+    setup_parallel_logger(ansi_mode)
+    if ansi_mode is AnsiMode.NEVER:
         command_options['--no-color'] = True
     return functools.partial(perform_command, options, handler, command_options)
 
@@ -172,7 +202,7 @@ def perform_command(options, handler, command_options):
         handler(command, command_options)
 
 
-def setup_logging():
+def setup_logging(console_handler):
     root_logger = logging.getLogger()
     root_logger.addHandler(console_handler)
     root_logger.setLevel(logging.DEBUG)
@@ -183,14 +213,12 @@ def setup_logging():
     logging.getLogger("docker").propagate = False
 
 
-def setup_parallel_logger(noansi):
-    if noansi:
-        import compose.parallel
-        compose.parallel.ParallelStreamWriter.set_noansi()
+def setup_parallel_logger(ansi_mode):
+    ParallelStreamWriter.set_default_ansi_mode(ansi_mode)
 
 
-def setup_console_handler(handler, verbose, noansi=False, level=None):
-    if handler.stream.isatty() and noansi is False:
+def setup_console_handler(handler, verbose, use_console_formatter=True, level=None):
+    if use_console_formatter:
         format_class = ConsoleWarningFormatter
     else:
         format_class = logging.Formatter
@@ -242,7 +270,8 @@ class TopLevelCommand:
       -c, --context NAME          Specify a context name
       --verbose                   Show more output
       --log-level LEVEL           Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-      --no-ansi                   Do not print ANSI control characters
+      --ansi (never|always|auto)  Control when to print ANSI control characters
+      --no-ansi                   Do not print ANSI control characters (DEPRECATED)
       -v, --version               Print version and exit
       -H, --host HOST             Daemon socket to connect to
 
@@ -362,6 +391,7 @@ class TopLevelCommand:
             --no-interpolate         Don't interpolate environment variables.
             -q, --quiet              Only validate the configuration, don't print
                                      anything.
+            --profiles               Print the profile names, one per line.
             --services               Print the service names, one per line.
             --volumes                Print the volume names, one per line.
             --hash="*"               Print the service config hash, one per line.
@@ -379,6 +409,15 @@ class TopLevelCommand:
                 image_digests = image_digests_for_project(self.project)
 
         if options['--quiet']:
+            return
+
+        if options['--profiles']:
+            profiles = set()
+            for service in compose_config.services:
+                if 'profiles' in service:
+                    for profile in service['profiles']:
+                        profiles.add(profile)
+            print('\n'.join(sorted(profiles)))
             return
 
         if options['--services']:
@@ -672,7 +711,7 @@ class TopLevelCommand:
             -t, --timestamps        Show timestamps.
             --tail="all"            Number of lines to show from the end of the logs
                                     for each container.
-            --no-log-prefix    Don't print prefix in logs.
+            --no-log-prefix         Don't print prefix in logs.
         """
         containers = self.project.containers(service_names=options['SERVICE'], stopped=True)
 
@@ -691,7 +730,7 @@ class TopLevelCommand:
         log_printer_from_project(
             self.project,
             containers,
-            set_no_color_if_clicolor(options['--no-color']),
+            options['--no-color'],
             log_args,
             event_stream=self.project.events(service_names=options['SERVICE']),
             keep_prefix=not options['--no-log-prefix']).run()
@@ -1090,7 +1129,7 @@ class TopLevelCommand:
                                        container. Implies --abort-on-container-exit.
             --scale SERVICE=NUM        Scale SERVICE to NUM instances. Overrides the
                                        `scale` setting in the Compose file if present.
-            --no-log-prefix       Don't print prefix in logs.
+            --no-log-prefix            Don't print prefix in logs.
         """
         start_deps = not options['--no-deps']
         always_recreate_deps = options['--always-recreate-deps']
@@ -1102,7 +1141,10 @@ class TopLevelCommand:
         detached = options.get('--detach')
         no_start = options.get('--no-start')
         attach_dependencies = options.get('--attach-dependencies')
-        keep_prefix = not options['--no-log-prefix']
+        keep_prefix = not options.get('--no-log-prefix')
+
+        if not IS_LINUX_PLATFORM:
+            print('Docker Compose is now in the Docker CLI, try `docker compose up`\n')
 
         if detached and (cascade_stop or exit_value_from or attach_dependencies):
             raise UserError(
@@ -1167,7 +1209,7 @@ class TopLevelCommand:
             log_printer = log_printer_from_project(
                 self.project,
                 attached_containers,
-                set_no_color_if_clicolor(options['--no-color']),
+                options['--no-color'],
                 {'follow': True},
                 cascade_stop,
                 event_stream=self.project.events(service_names=service_names),
@@ -1463,7 +1505,7 @@ def log_printer_from_project(
         keep_prefix=True,
 ):
     return LogPrinter(
-        containers,
+        [c for c in containers if c.log_driver not in (None, 'none')],
         build_log_presenters(project.service_names, monochrome, keep_prefix),
         event_stream or project.events(),
         cascade_stop=cascade_stop,
@@ -1651,7 +1693,3 @@ def warn_for_swarm_mode(client):
             "To deploy your application across the swarm, "
             "use `docker stack deploy`.\n"
         )
-
-
-def set_no_color_if_clicolor(no_color_flag):
-    return no_color_flag or os.environ.get('CLICOLOR') == "0"

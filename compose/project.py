@@ -13,6 +13,7 @@ from docker.utils import version_lt
 
 from . import parallel
 from .cli.errors import UserError
+from .cli.scan_suggest import display_scan_suggest_msg
 from .config import ConfigurationError
 from .config.config import V1
 from .config.sort_services import get_container_name_from_network_mode
@@ -490,8 +491,6 @@ class Project:
                 log.info('%s uses an image, skipping' % service.name)
 
         if cli:
-            log.info("Building with native build. Learn about native build in Compose here: "
-                     "https://docs.docker.com/go/compose-native-build/")
             if parallel_build:
                 log.warning("Flag '--parallel' is ignored when building with "
                             "COMPOSE_DOCKER_CLI_BUILD=1")
@@ -519,6 +518,9 @@ class Project:
         else:
             for service in services:
                 build_service(service)
+
+        if services:
+            display_scan_suggest_msg()
 
     def create(
         self,
@@ -651,10 +653,6 @@ class Project:
            override_options=None,
            ):
 
-        if cli:
-            log.info("Building with native build. Learn about native build in Compose here: "
-                     "https://docs.docker.com/go/compose-native-build/")
-
         self.initialize()
         if not ignore_orphans:
             self.find_orphan_containers(remove_orphans)
@@ -666,8 +664,15 @@ class Project:
             service_names,
             include_deps=start_deps)
 
+        must_build = False
         for svc in services:
+            if svc.must_build(do_build=do_build):
+                must_build = True
             svc.ensure_image_exists(do_build=do_build, silent=silent, cli=cli)
+
+        if must_build:
+            display_scan_suggest_msg()
+
         plans = self._get_convergence_plans(
             services,
             strategy,
@@ -789,7 +794,9 @@ class Project:
                 return
 
             try:
-                writer = parallel.get_stream_writer()
+                writer = parallel.ParallelStreamWriter.get_instance()
+                if writer is None:
+                    raise RuntimeError('ParallelStreamWriter has not yet been instantiated')
                 for event in strm:
                     if 'status' not in event:
                         continue
